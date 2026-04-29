@@ -77,13 +77,13 @@ Instead of a single LLM trying to do everything, ResearchMind assigns each task 
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────┐
-│  ✍️ Writer Agent                                        │
+│  ✍️ Writer Chain                                        │
 │  Synthesizes content into a structured report           │
 └─────────────────────┬───────────────────────────────────┘
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────┐
-│  🧐 Critic Agent                                        │
+│  🧐 Critic Chain                                        │
 │  Evaluates quality — scores, flags gaps, suggests fixes │
 └─────────────────────┬───────────────────────────────────┘
                       │
@@ -106,10 +106,10 @@ Parses Tavily's response to extract clean, validated URLs. Removes duplicates, i
 ### 📄 Reader Agent
 Scrapes selected web pages using `requests` + `BeautifulSoup`. Intelligently targets main content areas, strips boilerplate (navbars, footers, ads), and summarizes extracted content to manage LLM context window limits.
 
-### ✍️ Writer Agent
+### ✍️ Writer Chain 
 Powered by **Mistral AI via LangChain**, the Writer takes all gathered insights and generates a coherent, well-structured research report. Uses prompt engineering to enforce consistent report formatting and depth.
 
-### 🧐 Critic Agent
+### 🧐 Critic Chain
 A second LLM instance acting as a quality evaluator (**LLM-as-a-judge** pattern). Scores the report on completeness, coherence, source coverage, and clarity. Returns a numeric score (1–10), identified weaknesses, and concrete improvement suggestions.
 
 ---

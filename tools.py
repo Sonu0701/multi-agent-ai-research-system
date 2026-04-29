@@ -22,14 +22,14 @@ def web_search(query: str) -> str:
     Search the web and return structured results with title, URL, and summary.
     """
 
-    try:
+    try: 
         results = tavily.search(query=query, max_results=5)
 
         formatted_results = []
 
         for i, r in enumerate(results["results"], 1):
             formatted_results.append(
-                f"[{i}]\n"
+                f"[{i}]\n" 
                 f"Title: {r.get('title', 'N/A')}\n"
                 f"URL: {r.get('url', 'N/A')}\n"
                 f"Summary: {r.get('content', '')[:200]}"
@@ -100,4 +100,4 @@ def scrape_url(url: str) -> str:
         return text[:4000]
 
     except Exception as e:
-        return f"Scraping error: {str(e)}"
+        return f"Scraping error: {str(e)}" 
