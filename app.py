@@ -350,11 +350,10 @@ st.markdown("""
 #  AGENT DEFINITIONS
 # ─────────────────────────────────────────────
 AGENTS = [
-    {"num": "01", "key": "search",  "name": "Search Agent",        "desc": "Gathers recent web information about your topic"},
-    {"num": "02", "key": "urls",    "name": "URL Extractor Agent",  "desc": "Parses & pulls all relevant URLs from results"},
-    {"num": "03", "key": "reader",  "name": "Reader Agent",         "desc": "Scrapes & extracts deep content from the best URL"},
-    {"num": "04", "key": "writer",  "name": "Writer Chain",         "desc": "Drafts the full structured research report"},
-    {"num": "05", "key": "critic",  "name": "Critic Chain",         "desc": "Reviews & scores the report with feedback"},
+    {"num": "01", "key": "search",  "name": "Search Agent",  "desc": "Gathers recent web information via Tavily"},
+    {"num": "02", "key": "reader",  "name": "Reader Agent",  "desc": "Scrapes & extracts deep content from best URL"},
+    {"num": "03", "key": "writer",  "name": "Writer Agent",  "desc": "Drafts the full structured research report"},
+    {"num": "04", "key": "critic",  "name": "Critic Agent",  "desc": "Reviews & scores — retries if score < 7"},
 ]
 
 
@@ -430,7 +429,7 @@ left, right = st.columns([1, 1.35], gap="large")
 with left:
     st.markdown('<div style="height:0.4rem"></div>', unsafe_allow_html=True)
     st.markdown('<div class="page-title">Research<br>Pipeline</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-sub">Five AI agents · Fully automated · One topic</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-sub">Four AI agents · LangGraph powered · One topic</div>', unsafe_allow_html=True)
 
     st.markdown('<span class="mono-label">Research Topic</span>', unsafe_allow_html=True)
     topic = st.text_input("topic", placeholder="e.g. Quantum computing breakthroughs in 2025",
@@ -467,10 +466,7 @@ if run_btn:
         left.warning("⚠️  Please enter a research topic.")
         st.stop()
 
-    from agents import (
-        build_search_agent, build_url_extractor_agent,
-        build_reader_agent, writer_chain, critic_chain
-    )
+    from pipeline import build_research_graph
 
     done_keys  = []
     error_keys = []
@@ -485,69 +481,61 @@ if run_btn:
     def push_results():
         results_slot.markdown(results_html(results), unsafe_allow_html=True)
 
-    # STEP 1 — SEARCH
+    research_graph = build_research_graph()
+
     refresh("search")
-    try:
-        ag  = build_search_agent()
-        res = ag.invoke({"messages": [("user", f"Find recent and detailed information about: {topic}")]})
-        search_out        = res["messages"][-1].content
-        results["search"] = search_out
-        done_keys.append("search")
-    except Exception as e:
-        search_out        = "No results"
-        results["search"] = f"Error: {e}"
-        error_keys.append("search")
-    refresh("urls"); push_results()
 
-    # STEP 2 — URL EXTRACTION
-    try:
-        ag  = build_url_extractor_agent()
-        res = ag.invoke({"messages": [("user", f"Extract all URLs from this text:\n{search_out}")]})
-        urls_out        = res["messages"][-1].content
-        results["urls"] = urls_out
-        done_keys.append("urls")
-    except Exception as e:
-        urls_out        = ""
-        results["urls"] = f"Error: {e}"
-        error_keys.append("urls")
-    refresh("reader"); push_results()
+    initial_state = {
+        "topic": topic,
+        "search_results": "",
+        "scraped_content": "",
+        "report": "",
+        "feedback": "",
+        "score": 0,
+        "retry_count": 0,
+        "urls": ""
+    }
 
-    # STEP 3 — READER
     try:
-        ag  = build_reader_agent()
-        res = ag.invoke({"messages": [("user", f"From these URLs, choose the most relevant one and extract insights:\n{urls_out}")]})
-        scraped_out        = res["messages"][-1].content
-        results["reader"]  = scraped_out
-        done_keys.append("reader")
-    except Exception as e:
-        scraped_out        = "No content"
-        results["reader"]  = f"Error: {e}"
-        error_keys.append("reader")
-    refresh("writer"); push_results()
+        for step in research_graph.stream(initial_state, stream_mode="updates"):
+            node_name = list(step.keys())[0]
+            node_output = step[node_name]
 
-    # STEP 4 — WRITER
-    try:
-        combined          = f"SEARCH RESULTS:\n{search_out}\n\nSCRAPED CONTENT:\n{scraped_out}"
-        report_out        = writer_chain.invoke({"topic": topic, "research": combined})
-        results["report"] = report_out
-        done_keys.append("writer")
-    except Exception as e:
-        report_out        = "Failed to generate report"
-        results["report"] = f"Error: {e}"
-        error_keys.append("writer")
-    refresh("critic"); push_results()
+            if node_name == "search":
+                results["search"] = node_output.get("search_results", "")
+                results["urls"]   = node_output.get("urls", "")
+                done_keys.append("search")
+                refresh("reader")
 
-    # STEP 5 — CRITIC
-    try:
-        feedback_out        = critic_chain.invoke({"report": report_out})
-        results["feedback"] = feedback_out
-        done_keys.append("critic")
-    except Exception as e:
-        results["feedback"] = f"Error: {e}"
-        error_keys.append("critic")
-    refresh(None); push_results()
+            elif node_name == "reader":
+                results["reader"] = node_output.get("scraped_content", "")
+                done_keys.append("reader")
+                refresh("writer")
 
-    # Download
+            elif node_name == "writer":
+                results["report"] = node_output.get("report", "")
+                if "writer" not in done_keys:
+                    done_keys.append("writer")
+                refresh("critic")
+
+            elif node_name == "critic":
+                results["feedback"] = node_output.get("feedback", "")
+                score = node_output.get("score", 0)
+                retry = node_output.get("retry_count", 0)
+
+                if score < 7 and retry < 2:
+                    done_keys = [k for k in done_keys if k != "writer"]
+                    refresh("writer")
+                    st.toast(f"Score {score}/10 — refining report...", icon="🔄")
+                else:
+                    done_keys.append("critic")
+                    refresh(None)
+
+            push_results()
+
+    except Exception as e:
+        st.error(f"Pipeline error: {e}")
+
     dl = (
         f"TOPIC: {topic}\n\n"
         f"{'='*60}\nREPORT\n{'='*60}\n{results.get('report','')}\n\n"

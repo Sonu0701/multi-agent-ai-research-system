@@ -1,98 +1,51 @@
-from langchain.agents import create_agent
 from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langgraph.prebuilt import create_react_agent
 from tools import web_search, scrape_url, extract_urls
 from dotenv import load_dotenv
 import os
 
-# Load env
 load_dotenv()
 
 if not os.getenv("MISTRAL_API_KEY"):
     raise ValueError("MISTRAL_API_KEY missing")
 
-# LLM setup
-llm = ChatMistralAI(
-    model="mistral-small",
-    temperature=0.2
+llm = ChatMistralAI(model="mistral-small", temperature=0.2)
+
+# Search Agent (uses web_search tool)
+search_agent = create_react_agent(
+    model=llm,
+    tools=[web_search],
+    prompt="""You are a research search specialist.
+Search for accurate, recent, relevant information using web_search.
+Return structured results with titles, URLs, and summaries.
+Always prefer trusted sources. Do NOT hallucinate."""
 )
 
-# ==============================
-# 🔍 SEARCH AGENT
-# ==============================
-def build_search_agent():
-    return create_agent(
-        model=llm,
-        tools=[web_search],
-        system_prompt="""
-You are a research search specialist.
+# URL Extractor Agent
+url_agent = create_react_agent(
+    model=llm,
+    tools=[extract_urls],
+    prompt="""You are a URL extraction assistant.
+Extract all valid URLs from the given text using extract_urls tool.
+Remove duplicates. Return only clean URLs. No extra explanation."""
+)
 
-Your responsibilities:
-- Search for accurate, recent, and relevant information
-- Use the web_search tool whenever needed
-- Return structured results with titles, URLs, and summaries
+# Reader Agent (uses scrape_url tool)
+reader_agent = create_react_agent(
+    model=llm,
+    tools=[scrape_url],
+    prompt="""You are a web content analyst.
+From the URLs given, pick the most relevant one and use scrape_url.
+Ignore ads, navigation, and noise. Return structured key insights."""
+)
 
-Rules:
-- Always prefer trusted sources
-- Focus on clarity and relevance
-- Do NOT hallucinate
-"""
-    )
-
-# ==============================
-# 🔗 URL EXTRACTOR AGENT
-# ==============================
-def build_url_extractor_agent():
-    return create_agent(
-        model=llm,
-        tools=[extract_urls],
-        system_prompt="""
-You are a URL extraction assistant.
-
-Your job:
-- Extract all valid URLs from the given text
-- Remove duplicates
-- Return only clean URLs
-
-Do NOT add extra explanation.
-"""
-    )
-
-# ==============================
-# 📄 READER AGENT
-# ==============================
-def build_reader_agent():
-    return create_agent(
-        model=llm,
-        tools=[scrape_url],
-        system_prompt="""
-You are a web content analyst.
-
-Your job:
-- Read and extract useful information from web pages
-- Ignore ads, navigation, and noise
-- Focus on key insights, facts, and explanations
-
-Instructions:
-- Use scrape_url tool with the best URL
-- Return structured insights
-"""
-    )
-
-# ==============================
-# ✍️ WRITER CHAIN
-# ==============================
+# Writer prompt (LLM node, no tools needed)
 writer_prompt = ChatPromptTemplate.from_messages([
     ("system", """You are a senior research analyst.
-
-Write detailed, structured, and professional research reports.
-Ensure:
-- Logical flow
-- Clear explanations
-- Real-world relevance
-"""),
-
+Write detailed, structured, professional research reports.
+Ensure logical flow, clear explanations, and real-world relevance."""),
     ("human", """Write a detailed research report.
 
 Topic: {topic}
@@ -109,27 +62,18 @@ Format:
 
 Be professional and factual."""),
 ])
-
 writer_chain = writer_prompt | llm | StrOutputParser()
 
-# ==============================
-# 🧠 CRITIC CHAIN
-# ==============================
+# Critic prompt (returns a numeric score we can parse)
 critic_prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a strict research evaluator.
-
-Evaluate based on:
-- Depth
-- Clarity
-- Accuracy
-- Completeness
-"""),
-
+    ("system", """You are a strict research quality evaluator.
+Evaluate reports on: Depth, Clarity, Accuracy, Completeness.
+IMPORTANT: Always start your response with 'Score: X/10' on the first line."""),
     ("human", """Evaluate this report:
 
 {report}
 
-Give output in format:
+Respond in this exact format:
 
 Score: X/10
 
@@ -142,8 +86,10 @@ Weaknesses:
 Missing Insights:
 - ...
 
+Improvement Suggestions:
+- ...
+
 Final Verdict:
 ..."""),
 ])
-
 critic_chain = critic_prompt | llm | StrOutputParser()
